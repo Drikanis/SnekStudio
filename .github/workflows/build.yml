@@ -1,0 +1,60 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    services:
+      # docker registry to store build image between job steps
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
+    steps:
+      # check out git repository
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: true
+      # set up docker
+    - name: Set up Docker CLI
+      uses: docker/setup-buildx-action@v3
+      with:
+        driver-opts: network=host
+      # build docker image for running build script
+    - name: Prepare build environment
+      uses: docker/build-push-action@v5
+      with:
+        context: .github/containers/build
+        # cache layers for more efficient docker image creation
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        tags: localhost:5000/buildenv:${{ github.sha }}
+        push: true
+      # run build script to produce artifacts
+    - name: Build
+      run: |
+        .github/scripts/build.sh
+      env:
+        IMAGE: localhost:5000/buildenv:${{ github.sha }}
+        TARGET_PLATFORM: linux
+    - uses: actions/upload-artifact@v4
+      with:
+        name: SnekStudio-linux-x86_64.tar.gz
+        path: SnekStudio-linux-x86_64.tar.gz
+      # if this was workflow was triggered by release creation, upload the build as the release assets
+    - if: github.event_name == 'release'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./SnekStudio-linux-x86_64.tar.gz
+        asset_name: SnekStudio-linux-x86_64.tar.gz
+        asset_content_type: application/zip
